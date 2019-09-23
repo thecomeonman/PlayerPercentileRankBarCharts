@@ -1,0 +1,678 @@
+---
+title: "Player Percentile Rank Bar Charts"
+output: md_document
+---
+
+```{r setup, include=FALSE, echo=FALSE}
+
+library(data.table)
+library(ggplot2)
+library(scales)
+library(knitr)
+
+theme_set(theme_bw(12))
+
+nColumnWidthByTwo = 0.25
+nBufferForTextHorizontal = 0.005
+nBufferForTextVertical = 0.05
+vnQuantileMarkers = c(0.0, 0.25, 0.5, 0.75, 1.0)
+iPlayers = 123
+cPlayerNameToAnalyse = 'A A'
+
+```
+
+## Motivation
+
+<a href="https://twitter.com/AshwinRaman_">Ashwin Raman</a> on Twitter has made percentile rank bar charts quite popular. He also published a guide to <a href = "https://thefutebolist.wordpress.com/2018/10/19/a-guide-to-player-comparison-bar-graphs-and-how-i-make-them/">making your own charts with Tableau and Excel</a>. 
+
+This is an implementation of the same with R's ggplot. Ignore the cosmetics for now.
+
+## Side note: This vs. Radars
+
+This format of demonstrating results is a great improvement over radar charts. The visual area covered by the bars is a more reliable measure of the quality of a player than the visual area covered by radars. Since radars are arranged in a circular manner, the same sort of percentiles could look very different based on the order of the values. 
+
+Here are three radars of the same set of percentiles, just that the order of the metrics has been changed -
+
+```{r RadarsAreTerrible, echo=FALSE}
+
+pRadar1 = ggplot(
+   data.table(
+      Angle = seq(0, 1.75 * pi, pi/4),
+      Radius = c( 0.1, 0.1, 0.1, 0.1, 0.9, 0.9, 0.9, 0.9)
+   )[,
+      list(
+         x = cos(Angle) * Radius,
+         y = sin(Angle) * Radius
+      )
+   ]
+) + 
+   geom_polygon(
+      aes(
+         x = x,
+         y = y
+      ),
+      fill = 'red'
+   ) + 
+   geom_segment(
+      aes(
+         x = 0,
+         y = 0,
+         xend = x,
+         yend = y
+      )
+   ) + 
+   geom_point(
+      aes(x = 0, y = 0)
+   ) +
+   coord_fixed(
+      xlim = c(-1,1),
+      ylim = c(-1,1)
+   ) +
+   labs(
+      x = NULL,
+      y = NULL
+   ) + 
+   theme(
+      axis.text.x = element_blank(),
+      axis.text.y = element_blank()
+   )
+
+print(pRadar1)
+
+pRadar2 = ggplot(
+   data.table(
+      Angle = seq(0, 1.75 * pi, pi/4),
+      Radius = c( 0.1, 0.1, 0.9, 0.9, 0.1, 0.1, 0.9, 0.9)
+   )[,
+      list(
+         x = cos(Angle) * Radius,
+         y = sin(Angle) * Radius
+      )
+   ]
+) + 
+   geom_polygon(
+      aes(
+         x = x,
+         y = y
+      ),
+      fill = 'red'
+   ) + 
+   geom_segment(
+      aes(
+         x = 0,
+         y = 0,
+         xend = x,
+         yend = y
+      )
+   ) + 
+   geom_point(
+      aes(x = 0, y = 0)
+   ) +
+   coord_fixed(
+      xlim = c(-1,1),
+      ylim = c(-1,1)
+   ) +
+   labs(
+      x = NULL,
+      y = NULL
+   ) + 
+   theme(
+      axis.text.x = element_blank(),
+      axis.text.y = element_blank()
+   )
+
+print(pRadar2)
+
+pRadar3 = ggplot(
+   data.table(
+      Angle = seq(0, 1.75 * pi, pi/4),
+      Radius = c( 0.1, 0.9, 0.1, 0.9, 0.1, 0.9, 0.1, 0.9)
+   )[,
+      list(
+         x = cos(Angle) * Radius,
+         y = sin(Angle) * Radius
+      )
+   ]
+) + 
+   geom_polygon(
+      aes(
+         x = x,
+         y = y
+      ),
+      fill = 'red'
+   ) + 
+   geom_segment(
+      aes(
+         x = 0,
+         y = 0,
+         xend = x,
+         yend = y
+      )
+   ) + 
+   geom_point(
+      aes(x = 0, y = 0)
+   ) +
+   coord_fixed(
+      xlim = c(-1,1),
+      ylim = c(-1,1)
+   ) +
+   labs(
+      x = NULL,
+      y = NULL
+   ) + 
+   theme(
+      axis.text.x = element_blank(),
+      axis.text.y = element_blank()
+   )
+
+print(pRadar3)
+
+```
+
+See how different they look? Stop using radars, folks. They look cool but they don't work well.
+
+
+## Random Dataset
+
+First I generate a dataset of random metrics to demonstrate my code -
+
+```{r GeneratingRandomData, echo=FALSE}
+
+# generating random player names
+vcRandomPlayerNames = sapply(
+   seq(iPlayers) - 1,
+   function (iPlayer ) {
+      paste(
+         LETTERS[
+            1 + ( iPlayer %/% length(LETTERS)) 
+         ],
+         LETTERS[
+            1 + ( iPlayer %% length(LETTERS) )
+         ]
+      )
+   }
+)
+
+
+set.seed(1)
+dtStats = data.table(
+   PlayerName = vcRandomPlayerNames,
+   StatUniform = runif(iPlayers),
+   StatLeftSkew = abs(rnorm(iPlayers)),
+   StatRightSkew = 10 - abs(rnorm(iPlayers)),
+   StatVeryLeftSkew = abs(rnorm(iPlayers)) ^ 2,
+   StatVeryRightSkew = 10 - abs(rnorm(iPlayers) ^ 2)
+)
+
+dtStatsMelted = melt(
+   dtStats,
+   id.vars = c('PlayerName')
+)
+
+dtStatsMelted[,
+   variableIndex := .GRP,
+   variable
+]
+
+dtStatsMelted[,
+   Value_pile := rank(value)/ .N,
+   variable
+]
+
+kable(head(dtStats))
+
+```
+
+( Bear with the funny column names for now. )
+
+And now I draw charts for the player named, `r cPlayerNameToAnalyse`.
+
+Here's code that recreates the original design - 
+
+```{r vanillaDesign, echo=FALSE}
+
+p1 = ggplot() + 
+   geom_rect(
+      data = dtStatsMelted[
+         PlayerName == cPlayerNameToAnalyse
+      ],
+      aes(
+         xmin = 0,
+         ymin = variableIndex - nColumnWidthByTwo,
+         xmax = Value_pile, 
+         ymax = variableIndex + nColumnWidthByTwo,
+         group = paste(PlayerName, variable)
+      )
+   ) +
+   geom_text(
+      data = dtStatsMelted[
+         PlayerName == cPlayerNameToAnalyse
+      ],
+      aes(
+         x = Value_pile + nBufferForTextHorizontal, 
+         y = variableIndex,
+         group = paste(PlayerName, variable),
+         label = round(value, 2)
+      ),
+      hjust = 0
+   ) +
+   scale_y_continuous(
+      breaks = dtStatsMelted[, sort(unique(variableIndex))],
+      labels = dtStatsMelted[, list(variable = variable[1]), variableIndex][order(variableIndex), variable]
+   ) +
+   labs(
+      title = paste0(
+         'Player name: ', cPlayerNameToAnalyse
+      ),
+      x = NULL,
+      y = NULL
+   ) + 
+   theme(
+      axis.text.x = element_blank()
+   )
+   
+
+p1
+
+```
+
+## Improvement
+
+The only complaint I've had with this design is that by showingo only percentiles, the underlying distribution is completely lost. Let me demonstrate, and that's why the funnily named columns -
+
+```{r PDF, echo=FALSE, fig.width=10, fig.height=15}
+
+pPDF = ggplot(dtStatsMelted) +
+   geom_density(
+      aes(
+         x = value
+      )
+   ) +
+   facet_wrap(
+      ~variable,
+      ncol = 1,
+      scale = 'free'
+   ) +
+   labs(
+      title = 'Percentiles vs. distribution can be misleading',
+      x = 'Value',
+      y = 'Occurrence'
+   ) +
+   labs(
+      title = 'Distribution of each metric',
+      x = 'Value',
+      y = 'Occurrence'
+   )
+
+print(pPDF)
+
+```
+
+Note how the StatUniform values are nicely spread out across the X axis but the other four stats are all lumped towards one end or the other. When we take percentiles of these metrics and plot them against the actual value that percnetile corresponds to, here's what we get -
+
+```{r CDF, echo=FALSE, fig.width=10, fig.height=15}
+
+pCDF = ggplot(dtStatsMelted) +
+   geom_point(
+      aes(
+         x = Value_pile,
+         y = value,
+         color = 'Actual data'
+      )
+   ) + 
+   geom_line(
+      data = dtStatsMelted[, .SD[c(which.min(Value_pile), which.max(Value_pile))], variable],
+      aes(
+         x = Value_pile,
+         y = value,
+         color = 'What one might perceive'
+      )
+   ) +
+   facet_wrap(
+      ~variable,
+      ncol = 1,
+      scale = 'free_y'
+   ) +
+   scale_x_continuous(
+      labels = percent
+   ) +
+   labs(
+      title = 'Percentiles vs. distribution can be misleading',
+      x = 'Percentile',
+      y = 'Value'
+   )
+
+print(pCDF)
+
+```
+
+Percentiles just pick a value which has a certain proportion of the data below it. If your data is fairly uniformly distributed, i.e. there is an equal probability of encountering any value within the spectrum of possible values, then a percentile does the job fine. However, when your data is skewed, i.e. you may encounter lower values more often than higher values or vice versa, then a percentile can be misleading.
+
+In the second plot, the blue line adds a reference for what absolute value you might perceive the respective percentile is indicating. The gap in your persepctive and actual data is the gap between the red point and the blue line at that percentie. For instance, in any of the left skewed metrics, the 75th percentile as an absolute number is quite far from the best and much closer to the worst in fact. Conversely, the 25th percentile in the right skewed metrics, as an absolute value isn't as far from the best as the percentile might suggest. However, for StatUniform, they are never too far apart.
+
+## Enhancements
+
+With the designs below, I try to solve this problem as well.
+
+This player's StatVeryRightSkew is almost equal to the best value observed, even though it's only at around 60 percentile. All the other skewed columns also hae a similar issue. We will try and have some visual indicator to clear that up.
+
+### Design 2
+
+Add absolute values along the bar for each stat -
+
+
+```{r Design2, echo=FALSE}
+
+p2 = p1 +
+   geom_point(
+      data = dtStatsMelted[, 
+         list(Value_pile = vnQuantileMarkers), 
+         variableIndex
+      ],
+      aes(
+         x = Value_pile,
+         y = variableIndex - nColumnWidthByTwo
+      )
+   ) +
+   geom_segment(
+      data = dtStatsMelted[, 
+         list(
+            Value_pileMin = 0,
+            Value_pileMax = 1
+         ), 
+         variableIndex
+      ],
+      aes(
+         x = Value_pileMin,
+         xend = Value_pileMax,
+         y = variableIndex - nColumnWidthByTwo,
+         yend = variableIndex - nColumnWidthByTwo
+      )
+   ) +
+   geom_text(
+      data = dtStatsMelted[, 
+         list(
+            value = quantile(value, vnQuantileMarkers),
+            Value_pile = vnQuantileMarkers
+         ), 
+         list(
+            variable,
+            variableIndex
+         )
+      ],
+      aes(
+         x = Value_pile,
+         y = variableIndex - nColumnWidthByTwo - nBufferForTextVertical,
+         label = round(value, 2)
+      ),
+      vjust = 1
+   ) +
+   labs(
+      title = 'Design 2',
+      x = NULL,
+      y = NULL
+   ) + 
+   theme(
+      axis.text.x = element_blank()
+   )
+
+p2
+
+```
+
+### Design 3
+
+Overlay a miniature distribution on the bar for the respective stat -
+
+```{r Design3, echo=FALSE}
+
+
+dtAnnotations3a = dtStatsMelted[,
+   list(
+      Value_pile, 
+      value,
+      valueScaled = (value - min(value)) / ( 2 * (max(value) - min(value)))
+   ), 
+   variableIndex
+]
+
+dtAnnotations3b = dtStatsMelted[, 
+   list(
+      value = quantile(value, vnQuantileMarkers),
+      Value_pile = vnQuantileMarkers,
+      valueScaled = quantile(
+         (value - min(value)) / ( 2 * (max(value) - min(value))),
+         vnQuantileMarkers
+      )
+   ), 
+   list(
+      variable,
+      variableIndex
+   )
+]
+
+p3 = ggplot() +
+   geom_rect(
+      data = dtStatsMelted[
+         PlayerName == cPlayerNameToAnalyse
+      ],
+      aes(
+         xmin = 0,
+         ymin = variableIndex - nColumnWidthByTwo,
+         xmax = Value_pile, 
+         ymax = variableIndex + nColumnWidthByTwo,
+         group = paste(PlayerName, variable)
+      )
+   ) +
+   geom_segment(
+      data = dtStatsMelted[
+         PlayerName == cPlayerNameToAnalyse
+      ],
+      aes(
+         x = Value_pile,
+         xend = Value_pile,
+         y = variableIndex + nColumnWidthByTwo, 
+         yend = variableIndex - nColumnWidthByTwo - nBufferForTextVertical - nBufferForTextVertical,
+         group = paste(PlayerName, variable)
+      )
+   ) +
+   geom_text(
+      data = dtStatsMelted[
+         PlayerName == cPlayerNameToAnalyse
+      ],
+      aes(
+         x = Value_pile + nBufferForTextHorizontal, 
+         y = variableIndex - 0.25 - nBufferForTextVertical,
+         group = paste(PlayerName, variable),
+         label = round(value, 2)
+      ),
+      hjust = 0
+   ) +
+   scale_y_continuous(
+      breaks = dtStatsMelted[, sort(unique(variableIndex))],
+      labels = dtStatsMelted[, list(variable = variable[1]), variableIndex][order(variableIndex), variable]
+   ) + 
+   geom_line(
+      data = dtAnnotations3a,
+      aes(
+         x = Value_pile,
+         y = valueScaled + variableIndex - nColumnWidthByTwo,
+         group = variableIndex
+      )
+   ) + 
+   theme(
+      axis.text.x = element_blank()
+   )
+
+p3
+
+
+```
+
+And can add labels to the distribution if you want.
+
+```{r Design3a, echo=FALSE}
+
+p3a = p3 +
+   geom_label(
+      data = dtAnnotations3b[,.SD[Value_pile %in% c(min(Value_pile), max(Value_pile))], variableIndex],
+      aes(
+         x = Value_pile,
+         y = valueScaled + variableIndex - nColumnWidthByTwo + nBufferForTextVertical,
+         label = round(value, 2)
+      ),
+      vjust = 0
+   ) +
+   labs(
+      title = 'Design 3a'
+   )
+   
+print(p3a)
+
+```
+
+
+```{r Design3b, echo=FALSE}
+
+p3b = p3 +
+   geom_label(
+      data = dtAnnotations3b,
+      aes(
+         x = Value_pile,
+         y = valueScaled + variableIndex - nColumnWidthByTwo + nBufferForTextVertical,
+         label = round(value, 2)
+      ),
+      vjust = 0
+   ) +
+   labs(
+      title = 'Design 3b'
+   )
+   
+print(p3b)
+
+```
+
+### Design 4
+
+Within the bar, place the label at a point that indicates where it lies with respect to the absolute values. Can again choose to omit the labels or have the labels for the best and worst values.
+
+```{r Design4, echo=FALSE}
+
+dtAnnotations4a = dtStatsMelted[,
+   list(
+      PlayerName,
+      Value_pile, 
+      value,
+      valueScaled = (
+         (value - min(value)) / ( 2 * (max(value) - min(value)))
+      ) - nColumnWidthByTwo
+   ), 
+   variableIndex
+][
+   PlayerName == cPlayerNameToAnalyse | 
+   Value_pile %in% c(min(Value_pile), max(Value_pile))
+]
+
+
+p4 = ggplot() +
+   geom_rect(
+      data = dtStatsMelted[
+         PlayerName == cPlayerNameToAnalyse
+      ],
+      aes(
+         xmin = 0,
+         ymin = variableIndex - nColumnWidthByTwo,
+         xmax = Value_pile, 
+         ymax = variableIndex + nColumnWidthByTwo,
+         group = paste(PlayerName, variable)
+      )
+   ) +
+   geom_segment(
+      data = dtStatsMelted[
+         PlayerName == cPlayerNameToAnalyse
+      ],
+      aes(
+         x = Value_pile,
+         xend = Value_pile,
+         y = variableIndex + nColumnWidthByTwo, 
+         yend = variableIndex - nColumnWidthByTwo,
+         group = paste(PlayerName, variable)
+      )
+   ) +
+   geom_segment(
+      data = dtAnnotations4a[PlayerName == cPlayerNameToAnalyse],
+      aes(
+         x = Value_pile - nBufferForTextHorizontal, 
+         xend = Value_pile + nBufferForTextHorizontal, 
+         y = variableIndex + valueScaled,
+         yend = variableIndex + valueScaled
+      )
+   ) +
+   geom_text(
+      data = dtAnnotations4a[PlayerName == cPlayerNameToAnalyse],
+      aes(
+         x = Value_pile + nBufferForTextHorizontal, 
+         y = variableIndex + valueScaled,
+         label = round(value, 2)
+      ),
+      hjust = 0
+   ) +
+   geom_text(
+      data = merge(
+         dtAnnotations4a[Value_pile %in% c(min(Value_pile)), list(valueScaled, value, variableIndex)],
+         dtAnnotations4a[PlayerName == cPlayerNameToAnalyse, list(variableIndex, Value_pile)],
+         'variableIndex'
+      ),
+      aes(
+         x = Value_pile - nBufferForTextHorizontal, 
+         y = variableIndex + valueScaled - nBufferForTextVertical,
+         label = round(value, 2)
+      ),
+      hjust = 1,
+      vjust = 1
+   ) +
+   geom_text(
+      data = merge(
+         dtAnnotations4a[Value_pile %in% c(max(Value_pile)), list(valueScaled, value, variableIndex)],
+         dtAnnotations4a[PlayerName == cPlayerNameToAnalyse, list(variableIndex, Value_pile)],
+         'variableIndex'
+      ),
+      aes(
+         x = Value_pile - nBufferForTextHorizontal, 
+         y = variableIndex + valueScaled + nBufferForTextVertical,
+         label = round(value, 2)
+      ),
+      hjust = 1,
+      vjust = 0
+   ) +
+   scale_y_continuous(
+      breaks = dtStatsMelted[, sort(unique(variableIndex))],
+      labels = dtStatsMelted[, list(variable = variable[1]), variableIndex][order(variableIndex), variable]
+   ) +
+   geom_text() +
+   labs(
+      title = 'Design 4',
+      x = NULL,
+      y = NULL
+   ) + 
+   theme(
+      axis.text.x = element_blank()
+   )
+
+p4
+```
+
+
+## Why Not Colours or Size?
+
+Two other options that you could use to solve this problem:
+- We could have used colours to have a gradient over the bar, where the gradient is derived from the absolute value. 
+- We could have put the label in a particular colour.
+
+By throwing colour into the mix, the visual indicator of the area covered by the bars is messed with and the viewer is now forced to perceive size and colour both. The biggest advantage this design offers radars is then diluted. It would also look really complex and ugly with so many colours all over the place. That's why I chose to keep the single shade that Ashwin Raman originally used and only add labels or lines.
+
+## Make your own
+
+I've added code in the Script.R file in the same Github repository for you to create your own charts from the original templates. If you have suggestions, feedback, etc. please find <a href="twitter.com/thecomeonman">me on Twitter</a>. I will wait for a few days, in case there are any suggestions and then package this in a way that it's more easily reusable than now and looks better visually.
+
+You will need to install R and Rstudio from https://cran.r-project.org and https://www.rstudio.com/products/rstudio/download/ respectively. Once installed, open Rstudio and run the following command in the console - `install.packages('data.table','ggplot2','scales')` and you should be good to run the script. Follow the instructions and paste all the lines of code in your console to run it. Feel free to get in touch if you're stuck.
