@@ -8,11 +8,21 @@ cDataFilePath = ''
 # information about the player, add those column names here
 vcIDColumns = c('PlayerName','Age','Team','Season')
 
+# put the name of the player you want to analyse
+cPlayerNameToAnalyse = 'a a'
+
+
 # Paste the below lines into your console
 
 library(data.table)
 library(ggplot2)
 library(scales)
+
+nColumnWidthByTwo = 0.25
+nBufferForTextHorizontal = 0.005
+nBufferForTextVertical = 0.05
+vnQuantileMarkers = c(0.01, 0.25, 0.5, 0.75, 0.99)
+
 
 dtStats = fread(cDataFilePath)
 
